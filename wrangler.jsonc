@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "money-data",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-06-01",
+
+  // The Worker routes to this container, built from the Dockerfile at the root.
+  "containers": [
+    {
+      "class_name": "Backend",
+      "image": "./Dockerfile",
+      "max_instances": 2,
+      "instance_type": "basic"
+    }
+  ],
+
+  // Containers are fronted by a Durable Object namespace.
+  "durable_objects": {
+    "bindings": [{ "name": "BACKEND", "class_name": "Backend" }]
+  },
+
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Backend"] }],
+
+  "observability": { "enabled": true }
+}

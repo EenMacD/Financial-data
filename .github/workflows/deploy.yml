@@ -1,0 +1,53 @@
+name: Deploy to Cloud Run
+
+# Push to main -> Cloud Build builds the Dockerfile -> deploy to Cloud Run.
+# Requires these repo secrets (set once during bootstrap):
+#   GCP_PROJECT_ID  - the target Google Cloud project id
+#   GCP_SA_KEY      - JSON key for the gh-deployer service account (see scripts/setup-gcp.sh)
+#   DATABASE_URL    - Neon pooled connection string (?sslmode=require)
+#   JWT_SECRET      - long random string (e.g. `openssl rand -hex 32`); set once, never rotate casually
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Avoid overlapping deploys racing each other.
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy money-data \
+            --source . \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region us-central1 \
+            --allow-unauthenticated \
+            --min-instances 0 --max-instances 3 \
+            --memory 512Mi --cpu 1 --port 8080 \
+            --quiet \
+            --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }},JWT_SECRET=${{ secrets.JWT_SECRET }}"
+
+      - name: Show service URL
+        run: |
+          gcloud run services describe money-data \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region us-central1 \
+            --format 'value(status.url)'

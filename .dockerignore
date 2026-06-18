@@ -1,0 +1,13 @@
+# Keep the build context small.
+backend/target
+frontend/node_modules
+frontend/dist
+node_modules
+worker
+dist
+.git
+.gitignore
+*.log
+**/.DS_Store
+README.md
+start.sh

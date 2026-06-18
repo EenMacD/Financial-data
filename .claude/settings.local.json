@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(lsof -nP -iTCP:8080 -sTCP:LISTEN)",
+      "Read(//private/tmp/**)",
+      "Bash(docker build *)",
+      "Bash(docker rm *)",
+      "Bash(docker run *)",
+      "Bash(curl -s --max-time 5 http://127.0.0.1:8090/api/health)",
+      "Bash(echo \"health: $\\(curl -s --max-time 5 http://127.0.0.1:8090/api/health\\)\")",
+      "Bash(curl -s --max-time 5 http://127.0.0.1:8090/)",
+      "Bash(rm -f src/state.rs)",
+      "Bash(cargo build *)",
+      "Bash(cargo check *)",
+      "Bash(npm run *)",
+      "Bash(docker exec *)",
+      "Bash(break)",
+      "Bash(export DATABASE_URL=postgres://postgres:pw@127.0.0.1:5432/postgres)",
+      "Bash(export RUST_LOG=info)",
+      "Bash(cargo run *)",
+      "Bash(pkill -f 'target/debug/money-data-backend')",
+      "Bash(pkill -f 'cargo run')",
+      "Bash(bash start.sh)",
+      "Bash(python3 -c \"import yaml,sys; yaml.safe_load\\(open\\('.github/workflows/deploy.yml'\\)\\); print\\('deploy.yml: valid YAML'\\)\")",
+      "Bash(bash -n scripts/setup-gcp.sh)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(grep -E 'node_modules|/target/|\\\\.json$')"
+    ]
+  }
+}

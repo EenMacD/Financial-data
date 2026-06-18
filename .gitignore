@@ -1,0 +1,18 @@
+# Rust
+/backend/target
+
+# Node / Vite
+node_modules/
+dist/
+*.log
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Secrets / deploy artifacts — never commit
+*-key.json
+gh-sa-key.json
+.env
+.env.*

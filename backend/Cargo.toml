@@ -1,0 +1,22 @@
+[package]
+name = "money-data-backend"
+version = "0.1.0"
+edition = "2021"
+description = "Payment orchestration platform between Ebury (FX + wallets) and Ecommpay (card gateway)"
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+jsonwebtoken = "9"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "macros", "migrate"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[[bin]]
+name = "money-data-backend"
+path = "src/main.rs"
