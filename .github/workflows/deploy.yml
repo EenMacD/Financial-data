@@ -53,7 +53,7 @@ jobs:
           gcloud run deploy money-data \
             --source . \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --region us-central1 \
+            --region europe-west2 \
             --allow-unauthenticated \
             --min-instances 0 --max-instances 3 \
             --memory 512Mi --cpu 1 --port 8080 \
