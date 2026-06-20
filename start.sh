@@ -40,7 +40,11 @@ ensure_pg
 
 # Commands each Terminal window will run. `exec $SHELL` keeps the window open
 # after the server stops (e.g. after Ctrl-C) so you can see any final output.
-BACKEND_CMD="cd '$BACKEND_DIR' && export DATABASE_URL='$DATABASE_URL' && echo '▸ Rust backend → http://127.0.0.1:8080' && cargo run; exec \$SHELL"
+# Local-dev env: a throwaway JWT secret (the app refuses to boot without one) and
+# EXPOSE_MAGIC_LINK so the sign-in link shows in-app. NEVER set EXPOSE_MAGIC_LINK
+# in production — there the link is delivered out-of-band (logs / email).
+BACKEND_ENV="export DATABASE_URL='$DATABASE_URL' && export JWT_SECRET='dev-local-insecure-secret' && export EXPOSE_MAGIC_LINK=true"
+BACKEND_CMD="cd '$BACKEND_DIR' && $BACKEND_ENV && echo '▸ Rust backend → http://127.0.0.1:8080' && cargo run; exec \$SHELL"
 FRONTEND_CMD="cd '$FRONTEND_DIR' && { [ -d node_modules ] || npm install; } && echo '▸ Vite frontend → http://localhost:5173' && npm run dev; exec \$SHELL"
 
 # Open each command in its own new Terminal window.

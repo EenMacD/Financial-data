@@ -29,6 +29,16 @@ async fn main() {
         )
         .init();
 
+    // Refuse to boot without a real signing secret — otherwise session tokens
+    // would be forgeable against the insecure dev default. Generate one with
+    // `openssl rand -hex 32`. (start.sh sets a throwaway value for local dev.)
+    if env::var("JWT_SECRET").map(|s| s.trim().is_empty()).unwrap_or(true) {
+        panic!(
+            "JWT_SECRET must be set (e.g. `openssl rand -hex 32`); refusing to start \
+             with an insecure default"
+        );
+    }
+
     let database_url = env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (Postgres / Neon connection string)");
     let pool = db::connect_and_init(&database_url)

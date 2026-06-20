@@ -32,8 +32,11 @@ Two terminals:
 # 1) Backend  → http://127.0.0.1:8080  (needs a Postgres DATABASE_URL)
 #    Throwaway DB:  docker run -d --name md-pg -p 5432:5432 -e POSTGRES_PASSWORD=pw postgres:16-alpine
 cd backend
-DATABASE_URL=postgres://postgres:pw@127.0.0.1:5432/postgres cargo run
+DATABASE_URL=postgres://postgres:pw@127.0.0.1:5432/postgres \
+  JWT_SECRET=dev-local-insecure-secret EXPOSE_MAGIC_LINK=true cargo run
 #    (migrations run + demo data seeds automatically on first boot)
+#    JWT_SECRET is required (boot fails without it); EXPOSE_MAGIC_LINK shows the
+#    sign-in link in-app for local dev. `./start.sh` sets both for you.
 
 # 2) Frontend → http://localhost:5173  (proxies /api to the backend)
 cd frontend

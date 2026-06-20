@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1
 
 # ---------- Stage 1: build the Vite/TS frontend ----------
-# Output is arch-independent static files, so build natively for speed.
-FROM --platform=$BUILDPLATFORM node:20-slim AS frontend
+# Pin linux/amd64 (matches the runtime + Cloud Run). Avoid the BuildKit-only
+# $BUILDPLATFORM arg — Cloud Build's classic docker builder leaves it empty,
+# producing an invalid `--platform=` and failing at the first FROM.
+FROM --platform=linux/amd64 node:20-slim AS frontend
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci || npm install

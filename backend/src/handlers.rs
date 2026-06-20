@@ -197,9 +197,15 @@ pub async fn request_magic_link(
         db::create_auth_token(&pool, &token, "magic", &email, None, None, None, expires)
             .await
             .map_err(internal)?;
+        let link = format!("#/auth/verify?token={token}");
+        // SECURITY: the link is a bearer credential. Always record it server-side
+        // (retrievable from logs by the operator), but only return it in the HTTP
+        // response when EXPOSE_MAGIC_LINK is enabled — otherwise an unauthenticated
+        // caller could request a link for any known email and sign in as them.
+        tracing::info!("magic-link sign-in for {email}: {link}");
         MagicLinkResp {
             sent: true,
-            magic_link: Some(format!("#/auth/verify?token={token}")),
+            magic_link: if expose_magic_link() { Some(link) } else { None },
         }
     } else {
         MagicLinkResp { sent: true, magic_link: None }
@@ -994,4 +1000,14 @@ async fn ensure_wallet(
 
 fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
+}
+
+/// Whether to return magic-link sign-in URLs in the HTTP response (the "mock
+/// email" dev convenience). MUST stay off in production — leave `EXPOSE_MAGIC_LINK`
+/// unset on the deployed service and read links from the server logs instead.
+fn expose_magic_link() -> bool {
+    matches!(
+        std::env::var("EXPOSE_MAGIC_LINK").as_deref(),
+        Ok("true") | Ok("1")
+    )
 }

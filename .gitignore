@@ -11,6 +11,9 @@ dist/
 .vscode/
 .idea/
 
+# Local Claude Code settings (personal, not shared)
+.claude/settings.local.json
+
 # Secrets / deploy artifacts — never commit
 *-key.json
 gh-sa-key.json

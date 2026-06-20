@@ -25,7 +25,12 @@
       "Bash(bash -n scripts/setup-gcp.sh)",
       "Bash(git init *)",
       "Bash(git add *)",
-      "Bash(grep -E 'node_modules|/target/|\\\\.json$')"
+      "Bash(grep -E 'node_modules|/target/|\\\\.json$')",
+      "Bash(gcloud auth *)",
+      "Bash(gcloud config *)",
+      "Bash(gcloud run *)",
+      "Bash(gh auth *)",
+      "Bash(gcloud iam *)"
     ]
   }
 }
