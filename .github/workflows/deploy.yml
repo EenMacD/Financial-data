@@ -23,6 +23,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Diagnostic: confirms each secret actually resolves in this workflow.
+      # Prints only lengths, never the values. Remove once auth is working.
+      - name: Verify secrets are present
+        env:
+          SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          DB: ${{ secrets.DATABASE_URL }}
+          JWT: ${{ secrets.JWT_SECRET }}
+        run: |
+          check() { if [ -z "$2" ]; then echo "❌ $1 is EMPTY"; else echo "✅ $1 present (${#2} chars)"; fi; }
+          check GCP_SA_KEY      "$SA_KEY"
+          check GCP_PROJECT_ID  "$PROJECT"
+          check DATABASE_URL    "$DB"
+          check JWT_SECRET      "$JWT"
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
