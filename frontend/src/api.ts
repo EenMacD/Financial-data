@@ -143,6 +143,12 @@ export interface InviteResponse {
   email: string;
 }
 
+export interface SigninLinkResponse {
+  email: string;
+  /** Relative sign-in path; prefix with location.origin for a full URL. */
+  link: string;
+}
+
 export interface SignupResponse {
   tenant: Tenant;
   onboarding_url: string | null;
@@ -234,6 +240,11 @@ export const api = {
   }) => request<Tenant>("/tenants", { method: "POST", body: JSON.stringify(body) }),
   invite: (body: { email: string; role: Role; tenant_id?: string }) =>
     request<InviteResponse>("/invites", { method: "POST", body: JSON.stringify(body) }),
+  tenantSigninLink: (tenantId: string, email: string) =>
+    request<SigninLinkResponse>(`/tenants/${tenantId}/signin-link`, {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
   listUsers: () => request<User[]>("/users"),
 
   // Public self-serve KYB/KYC sign-up

@@ -11,10 +11,11 @@ by a free Neon Postgres. See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the rati
 
 ---
 
-## The four GitHub secrets
+## The GitHub secrets
 
-The workflow reads four secrets. Below is how to obtain each value, then how to add them to
-GitHub **by hand** through the web UI.
+The workflow reads seven secrets. The first four are needed to deploy at all; the last three
+wire up emailed sign-in links (self-service login). Below is how to obtain each value, then how
+to add them to GitHub **by hand** through the web UI.
 
 | Secret | What it is | How to get the value |
 | ------ | ---------- | -------------------- |
@@ -22,6 +23,9 @@ GitHub **by hand** through the web UI.
 | `GCP_SA_KEY` | JSON key for the `gh-deployer` service account | Create the SA + key (steps below); the secret value is the **entire contents** of the `.json` file |
 | `DATABASE_URL` | Neon pooled connection string | Neon dashboard (steps below) |
 | `JWT_SECRET` | Signs auth session tokens | `openssl rand -hex 32` |
+| `RESEND_API_KEY` | Resend API key that authorises emailing sign-in links | Resend dashboard → API Keys (steps below); looks like `re_…` |
+| `EMAIL_FROM` | Sender shown on sign-in emails | A verified Resend domain address (steps below), e.g. `money·data <login@yourdomain.com>` |
+| `APP_BASE_URL` | Canonical public URL for absolute links in emails | Your Cloud Run service URL, e.g. `https://money-data-xxx.run.app` |
 
 ### 1. `GCP_PROJECT_ID`
 
@@ -75,11 +79,52 @@ openssl rand -hex 32
 Set it **once** and keep it stable — changing it logs everyone out. The app refuses to boot
 without it.
 
+### 5. `RESEND_API_KEY`
+
+Sign-in is passwordless: a user enters their email and receives a one-time link. The link is a
+bearer credential, so it must be **emailed to the address owner** (the inbox is the proof of
+identity) — that's what this key enables. Without it, no email is sent and links only reach the
+server logs.
+
+1. Sign up at **[resend.com](https://resend.com)** (free tier: ~3,000 emails/mo, no card).
+2. Dashboard → **API Keys → Create API Key** → name it `money-data`, permission **Sending
+   access** → **Create**.
+3. Copy the key (shown once) — it looks like `re_xxxxxxxx`. That's the secret value.
+
+### 6. `EMAIL_FROM`
+
+The "From" address on sign-in emails. To send to **anyone's** inbox (your tenants) you must
+send from a **domain you've verified** in Resend:
+
+1. Resend dashboard → **Domains → Add Domain** → enter a domain you own (e.g. `yourdomain.com`).
+2. Resend shows a set of **DNS records** (SPF, DKIM, and a DMARC entry). Add them at your DNS
+   provider (Cloudflare, Namecheap, etc.), then click **Verify** — it goes green within minutes
+   to a few hours.
+3. Set `EMAIL_FROM` to a sender on that domain, formatted as `Display Name <user@domain>`, e.g.
+   `money·data <login@yourdomain.com>`.
+
+> **No domain yet?** Leave `EMAIL_FROM` unset — the app falls back to Resend's sandbox sender
+> `onboarding@resend.dev`, which can **only deliver to your own Resend-account email**. That's
+> enough to test the flow and for the admin to sign in, but tenants won't receive mail until a
+> domain is verified.
+
+### 7. `APP_BASE_URL`
+
+The canonical origin used to turn the relative `#/auth/verify?token=…` path into a full
+clickable URL in the email. Use your deployed service URL (the **Deploy to Cloud Run** step
+prints it, or run `gcloud run services describe money-data --region europe-west2 --format
+'value(status.url)'`), e.g. `https://money-data-xxx.run.app` — or your custom domain if you
+add one. No trailing slash.
+
+> Optional: if unset, the backend reconstructs the URL from the request's forwarded host, which
+> is correct on Cloud Run. Set it explicitly when you want links pinned to a canonical domain.
+
 ### Add them to GitHub (web UI)
 
 1. Repo → **Settings → Secrets and variables → Actions**.
 2. Select the **Secrets** tab → **Repository secrets** → **New repository secret**.
-3. Add each of the four: `GCP_PROJECT_ID`, `GCP_SA_KEY`, `DATABASE_URL`, `JWT_SECRET`.
+3. Add each: `GCP_PROJECT_ID`, `GCP_SA_KEY`, `DATABASE_URL`, `JWT_SECRET`, `RESEND_API_KEY`,
+   `EMAIL_FROM`, `APP_BASE_URL`.
 
 > ⚠️ **Use _Repository_ secrets, not _Environment_ secrets.** Environment secrets are only
 > readable by a job that declares `environment: <name>`. The workflow doesn't, so
@@ -98,7 +143,8 @@ git push origin main
 ```
 
 Watch the run under the repo's **Actions** tab. The **Verify secrets are present** step should
-print `✅` for all four; the **Deploy to Cloud Run** step prints your URL:
+print `✅` for the four deploy secrets it checks (the three email secrets aren't in that
+diagnostic); the **Deploy to Cloud Run** step prints your URL:
 
 ```
 https://money-data-xxxxxxxx-uc.a.run.app
@@ -125,25 +171,31 @@ durable-DB win.
 
 ## Runtime env vars (reference)
 
-These are set on the Cloud Run service by the workflow (`DATABASE_URL`, `JWT_SECRET`).
+These are set on the Cloud Run service by the workflow (`DATABASE_URL`, `JWT_SECRET`,
+`RESEND_API_KEY`, `EMAIL_FROM`, `APP_BASE_URL`).
 
 | Var | Purpose |
 | --- | ------- |
 | `DATABASE_URL` | Postgres connection (Neon pooled string, `?sslmode=require`). **Required.** |
 | `JWT_SECRET` | Signs auth session tokens. **Required — the app refuses to boot without it.** Set once, keep stable; changing it logs everyone out. |
+| `RESEND_API_KEY` | Resend API key. **Required for self-service login** — when set, sign-in links are emailed to the user's inbox. Unset = no email is sent (links only hit the server logs). |
+| `EMAIL_FROM` | Sender for sign-in emails, e.g. `money·data <login@yourdomain.com>`. Use a **verified Resend domain** to reach external recipients; the default sandbox sender only delivers to your own Resend-account address. |
+| `APP_BASE_URL` | Canonical public URL (e.g. `https://money-data-xxx.run.app`) used to build the absolute link in emails. Optional — falls back to the request's forwarded host. |
 | `EXPOSE_MAGIC_LINK` | **Leave UNSET in production.** Local-dev only: returns the sign-in link in the API response. In production it would let anyone request a link for a known email and sign in as them. |
 
-**Signing in on the deployed site (no email yet):** auth is passwordless magic-link, and with
-`EXPOSE_MAGIC_LINK` unset the link is **not** returned to the browser — it's written to the
-server logs. The seeded admin `digitallymba@gmail.com` exists on first boot. To sign in,
-request the link in the UI, then read it from the logs:
+**Signing in on the deployed site:** auth is passwordless magic-link. With `RESEND_API_KEY`
+set, requesting a link on the login page **emails** a one-time `#/auth/verify?token=…` URL to
+the address (the seeded admin `digitallymba@gmail.com` exists on first boot). Open the email,
+click **Complete sign in**, and you're in — this works for admins and tenant users alike.
+
+If `RESEND_API_KEY` is unset (or to recover when email is misconfigured), the link is still
+written to the server logs instead:
 
 ```bash
-gcloud run services logs read money-data --region us-central1 --limit 20 | grep magic-link
+gcloud run services logs read money-data --region europe-west2 --limit 20 | grep magic-link
 ```
 
-Open that `#/auth/verify?token=…` path on your deployed URL. (Swap to real email delivery, or
-front the site with IAP/Basic-Auth, before opening it up to others.)
+Open that `#/auth/verify?token=…` path on your deployed URL.
 
 ---
 

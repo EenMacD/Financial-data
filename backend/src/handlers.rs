@@ -2,7 +2,7 @@
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use crate::auth::{self, AuthCtx};
 use crate::db;
+use crate::email;
 use crate::fx;
 use crate::models::*;
 
@@ -180,6 +181,7 @@ pub struct MagicLinkResp {
 
 pub async fn request_magic_link(
     State(pool): State<PgPool>,
+    headers: HeaderMap,
     Json(req): Json<MagicLinkReq>,
 ) -> ApiResult<MagicLinkResp> {
     let email = req.email.trim().to_lowercase();
@@ -199,10 +201,15 @@ pub async fn request_magic_link(
             .map_err(internal)?;
         let link = format!("#/auth/verify?token={token}");
         // SECURITY: the link is a bearer credential. Always record it server-side
-        // (retrievable from logs by the operator), but only return it in the HTTP
-        // response when EXPOSE_MAGIC_LINK is enabled — otherwise an unauthenticated
-        // caller could request a link for any known email and sign in as them.
+        // (retrievable from logs by the operator). For self-service login we email
+        // it to the address owner — the inbox is the proof of identity, so it's safe
+        // even though the endpoint is unauthenticated. The link is only echoed back
+        // in the HTTP response when EXPOSE_MAGIC_LINK is on (local dev without email).
         tracing::info!("magic-link sign-in for {email}: {link}");
+        let full_url = format!("{}/{link}", base_url(&headers));
+        if let Err(e) = email::send_magic_link(&email, &full_url).await {
+            tracing::error!("failed to email magic link to {email}: {e}");
+        }
         MagicLinkResp {
             sent: true,
             magic_link: if expose_magic_link() { Some(link) } else { None },
@@ -211,6 +218,27 @@ pub async fn request_magic_link(
         MagicLinkResp { sent: true, magic_link: None }
     };
     Ok(Json(resp))
+}
+
+/// Public base URL for building absolute links (e.g. emailed sign-in URLs).
+/// Prefers `APP_BASE_URL`; otherwise reconstructs it from the request's forwarded
+/// host/scheme (Cloud Run sets `Host` + `X-Forwarded-Proto`).
+fn base_url(headers: &HeaderMap) -> String {
+    if let Ok(b) = std::env::var("APP_BASE_URL") {
+        let b = b.trim().trim_end_matches('/');
+        if !b.is_empty() {
+            return b.to_string();
+        }
+    }
+    let host = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost");
+    let proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("http");
+    format!("{proto}://{host}")
 }
 
 #[derive(Deserialize)]
@@ -298,6 +326,76 @@ pub async fn create_invite(
         accept_link: format!("#/accept-invite?token={token}"),
         email,
     }))
+}
+
+#[derive(Deserialize)]
+pub struct SigninLinkReq {
+    pub email: String,
+}
+
+#[derive(Serialize)]
+pub struct SigninLinkResp {
+    pub email: String,
+    /// Relative sign-in path (the frontend prefixes `location.origin`).
+    /// `#/auth/verify?…` for a returning tenant user, `#/accept-invite?…` otherwise.
+    pub link: String,
+}
+
+/// Admin-only: mint a copyable sign-in link for a specific tenant's user. If the
+/// email already belongs to a user of this tenant we issue an instant magic-link
+/// (`#/auth/verify`); otherwise we issue a tenant invite (`#/accept-invite`) that
+/// creates the user on first use. Returning the link directly is safe because the
+/// caller is an authenticated admin (unlike the public magic-link endpoint).
+pub async fn send_tenant_signin_link(
+    State(pool): State<PgPool>,
+    auth: AuthCtx,
+    Path(tenant_id): Path<String>,
+    Json(req): Json<SigninLinkReq>,
+) -> ApiResult<SigninLinkResp> {
+    if !auth.is_admin() {
+        return Err(forbidden("admin only"));
+    }
+    let email = req.email.trim().to_lowercase();
+    if email.is_empty() {
+        return Err(bad("email is required"));
+    }
+    db::get_tenant(&pool, &tenant_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| not_found("tenant not found"))?;
+
+    let existing = db::find_user_by_email(&pool, &email).await.map_err(internal)?;
+    let token = auth::random_token();
+    let link = if existing
+        .as_ref()
+        .map(|u| u.tenant_id.as_deref() == Some(tenant_id.as_str()))
+        .unwrap_or(false)
+    {
+        // Returning tenant user → instant magic-link sign-in.
+        let expires = Utc::now() + Duration::minutes(15);
+        db::create_auth_token(&pool, &token, "magic", &email, None, None, None, expires)
+            .await
+            .map_err(internal)?;
+        format!("#/auth/verify?token={token}")
+    } else {
+        // New (or unrelated) email → invite that pins them to this tenant.
+        let expires = Utc::now() + Duration::days(7);
+        db::create_auth_token(
+            &pool,
+            &token,
+            "invite",
+            &email,
+            None,
+            Some("tenant"),
+            Some(tenant_id.as_str()),
+            expires,
+        )
+        .await
+        .map_err(internal)?;
+        format!("#/accept-invite?token={token}")
+    };
+    tracing::info!("admin sign-in link for tenant {tenant_id} / {email}: {link}");
+    Ok(Json(SigninLinkResp { email, link }))
 }
 
 #[derive(Deserialize)]

@@ -7,6 +7,7 @@
 
 mod auth;
 mod db;
+mod email;
 mod fx;
 mod handlers;
 mod models;
@@ -63,6 +64,10 @@ async fn main() {
         .route(
             "/api/tenants",
             get(handlers::list_tenants).post(handlers::create_tenant),
+        )
+        .route(
+            "/api/tenants/:tenant_id/signin-link",
+            post(handlers::send_tenant_signin_link),
         )
         .route("/api/invites", post(handlers::create_invite))
         .route("/api/users", get(handlers::list_users))

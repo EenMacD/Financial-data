@@ -42,11 +42,12 @@ let session: Session | null = null;
 let data: AppData | null = null;
 let currentTab: Tab = "incoming";
 
-type Tab = "incoming" | "refunds" | "treasury" | "settings";
+type Tab = "incoming" | "refunds" | "treasury" | "tenants" | "settings";
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "incoming", label: "Incoming payments", icon: "↘" },
   { id: "refunds", label: "Refunds", icon: "↺" },
   { id: "treasury", label: "Treasury", icon: "▤" },
+  { id: "tenants", label: "Tenants", icon: "▦" },
   { id: "settings", label: "Settings", icon: "⚙" },
 ];
 
@@ -166,29 +167,20 @@ function renderApp(): void {
   const op = d.dashboard.operator;
   const isAdmin = s.user.role === "admin";
 
-  const nav = TABS.map(
-    (t) => `
+  // Tenants is an admin-only portal; bounce non-admins who land on it directly.
+  if (currentTab === "tenants" && !isAdmin) {
+    location.hash = "#/incoming";
+    return;
+  }
+
+  const nav = TABS.filter((t) => t.id !== "tenants" || isAdmin)
+    .map(
+      (t) => `
       <a class="nav__item ${t.id === currentTab ? "is-active" : ""}" href="#/${t.id}">
         <span class="nav__icon">${t.icon}</span>${t.label}
       </a>`
-  ).join("");
-
-  const switcher =
-    isAdmin && s.tenants.length
-      ? `<label class="switcher">
-           <span>Tenant</span>
-           <select class="select select--sm" data-action="switch-tenant">
-             ${s.tenants
-               .map(
-                 (t) =>
-                   `<option value="${t.id}" ${t.id === s.activeTenantId ? "selected" : ""}>${esc(
-                     t.name
-                   )}</option>`
-               )
-               .join("")}
-           </select>
-         </label>`
-      : "";
+    )
+    .join("");
 
   app.innerHTML = `
     <div class="layout">
@@ -214,7 +206,6 @@ function renderApp(): void {
             <span>${esc(op.region)} · bills in ${op.settlement_currency}</span>
           </div>
           <div class="topbar__spacer"></div>
-          ${switcher}
           <button class="btn btn--primary" data-action="open-create">＋ Create payment</button>
         </header>
         <div class="shell">${renderTab(d)}</div>
@@ -230,6 +221,8 @@ function renderTab(d: AppData): string {
       return renderRefundsTab(d);
     case "treasury":
       return renderTreasury(d);
+    case "tenants":
+      return renderTenants();
     case "settings":
       return renderSettings(d);
   }
@@ -490,48 +483,62 @@ function renderSettings(d: AppData): string {
       </div>
     </section>`;
 
-  let tenantsCard = "";
-  if (isAdmin) {
-    const tRows = s.tenants
-      .map(
-        (t) => `<tr>
-          <td>
-            <div class="cell-strong">${esc(t.name)}</div>
-            <div class="cell-muted" style="font-size:12px">${t.country ? esc(t.country) : esc(t.region) || "—"}${
-          t.ryft_subaccount_id ? ` · ${esc(t.ryft_subaccount_id)}` : ""
-        }</div>
-          </td>
-          <td>${t.settlement_currency}</td>
-          <td><span class="chip chip--${onboardingChip(t.onboarding_status)}">${esc(t.onboarding_status)}</span></td>
-          <td class="text-right">
-            <button class="btn btn--sm" data-action="invite-tenant" data-id="${t.id}" data-name="${esc(
-          t.name
-        )}">Invite to sign in</button>
-          </td>
-        </tr>`
-      )
-      .join("");
-    tenantsCard = `
-      <section class="card">
-        <div class="card__head"><h2>Tenants · onboarded businesses</h2></div>
-        <div class="card__body">
-          <form id="add-tenant-form" class="inline-form">
-            <input class="input" name="name" placeholder="Business name" required />
-            <input class="input" name="country" placeholder="Country" />
-            <select class="select" name="billing_currency">
-              ${BILLING_CURRENCIES.map((c) => `<option value="${c}">${c}</option>`).join("")}
-            </select>
-            <button class="btn btn--primary" type="submit">Add tenant</button>
-          </form>
-          <table style="margin-top:8px">
-            <thead><tr><th>Business</th><th>Bills in</th><th>Onboarding</th><th></th></tr></thead>
-            <tbody>${tRows || `<tr><td colspan="4"><div class="empty">No tenants yet.</div></td></tr>`}</tbody>
-          </table>
-        </div>
-      </section>`;
-  }
+  return usersCard;
+}
 
-  return `${tenantsCard}${usersCard}`;
+// ---------------------------------------------------------------------------
+// Tab: Tenants (admin-only portal) — the single home for tenant management
+// and sending one-time sign-in links.
+// ---------------------------------------------------------------------------
+
+function renderTenants(): string {
+  const s = session!;
+  const tRows = s.tenants
+    .map((t) => {
+      const isActive = t.id === s.activeTenantId;
+      return `<tr>
+        <td>
+          <div class="cell-strong">${esc(t.name)}${
+        isActive ? ` <span class="chip chip--paid">Active</span>` : ""
+      }</div>
+          <div class="cell-muted" style="font-size:12px">${t.country ? esc(t.country) : esc(t.region) || "—"}${
+        t.ryft_subaccount_id ? ` · ${esc(t.ryft_subaccount_id)}` : ""
+      }</div>
+        </td>
+        <td>${t.settlement_currency}</td>
+        <td><span class="chip chip--${onboardingChip(t.onboarding_status)}">${esc(t.onboarding_status)}</span></td>
+        <td class="text-right">
+          <button class="btn btn--sm" data-action="select-tenant" data-id="${t.id}"${
+        isActive ? " disabled" : ""
+      }>${isActive ? "Selected" : "Select"}</button>
+          <button class="btn btn--sm btn--primary" data-action="invite-tenant" data-id="${t.id}" data-name="${esc(
+        t.name
+      )}">Send sign-in link</button>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  return `
+    <section class="card">
+      <div class="card__head"><h2>Tenants · onboarded businesses</h2></div>
+      <div class="card__body">
+        <form id="add-tenant-form" class="inline-form">
+          <input class="input" name="name" placeholder="Business name" required />
+          <input class="input" name="country" placeholder="Country" />
+          <select class="select" name="billing_currency">
+            ${BILLING_CURRENCIES.map((c) => `<option value="${c}">${c}</option>`).join("")}
+          </select>
+          <button class="btn btn--primary" type="submit">Add tenant</button>
+        </form>
+        <p class="cell-muted" style="font-size:12px;margin:8px 0 0">
+          Select a tenant to view its data, or send a one-time sign-in link to its team.
+        </p>
+        <table style="margin-top:8px">
+          <thead><tr><th>Business</th><th>Bills in</th><th>Onboarding</th><th></th></tr></thead>
+          <tbody>${tRows || `<tr><td colspan="4"><div class="empty">No tenants yet.</div></td></tr>`}</tbody>
+        </table>
+      </div>
+    </section>`;
 }
 
 function onboardingChip(status: string): string {
@@ -776,11 +783,25 @@ function renderMessage(title: string, body: string): void {
   app.innerHTML = authShell(`<h1 class="auth__title">${title}</h1><p class="auth__sub">${body}</p>`);
 }
 
-async function handleVerify(token: string | null): Promise<void> {
+// Require an explicit click before consuming the single-use token: emailed links
+// are pre-fetched by inbox security scanners, which would otherwise burn the token
+// before the real user clicks (leaving them with an "expired" link).
+function handleVerify(token: string | null): void {
   if (!token) {
     location.hash = "#/login";
     return;
   }
+  app.innerHTML = authShell(`
+    <h1 class="auth__title">Confirm sign in</h1>
+    <p class="auth__sub">Click below to finish signing in to money·data.</p>
+    <button class="btn btn--primary" id="verify-btn" style="width:100%;justify-content:center">Complete sign in</button>
+  `);
+  const btn = document.querySelector<HTMLButtonElement>("#verify-btn")!;
+  btn.addEventListener("click", () => void completeVerify(token, btn));
+}
+
+async function completeVerify(token: string, btn: HTMLButtonElement): Promise<void> {
+  btn.disabled = true;
   renderMessage("Signing you in…", "One moment.");
   try {
     const s = await api.verify(token);
@@ -880,7 +901,7 @@ async function handleRequestMagicLink(form: HTMLFormElement): Promise<void> {
     } else {
       result.innerHTML = `<div class="success-note">If an account exists for ${esc(
         email
-      )}, a sign-in link has been generated.</div>`;
+      )}, we've emailed a one-time sign-in link. Check your inbox.</div>`;
     }
   } catch (e) {
     toast((e as Error).message, "error");
@@ -946,8 +967,8 @@ async function handleInviteTenant(tenantId: string, name: string): Promise<void>
   const el = document.createElement("div");
   el.innerHTML = `
     <div class="modal__head">
-      <h3>Invite ${esc(name)}</h3>
-      <p>Send this business an invite to sign in to their tenant.</p>
+      <h3>Send sign-in link · ${esc(name)}</h3>
+      <p>Generate a one-time sign-in link for this tenant, then copy and send it.</p>
     </div>
     <div class="modal__body">
       <form id="invite-tenant-form">
@@ -955,7 +976,7 @@ async function handleInviteTenant(tenantId: string, name: string): Promise<void>
           <label>Email</label>
           <input class="input" name="email" type="email" placeholder="owner@business.com" required autofocus />
         </div>
-        <button class="btn btn--primary" type="submit" style="width:100%;justify-content:center">Create invite link</button>
+        <button class="btn btn--primary" type="submit" style="width:100%;justify-content:center">Generate sign-in link</button>
       </form>
       <div id="invite-tenant-result"></div>
     </div>`;
@@ -965,10 +986,10 @@ async function handleInviteTenant(tenantId: string, name: string): Promise<void>
     e.preventDefault();
     const email = String(new FormData(form).get("email") || "").trim();
     try {
-      const res = await api.invite({ email, role: "tenant", tenant_id: tenantId });
-      const url = `${location.origin}/${res.accept_link}`;
+      const res = await api.tenantSigninLink(tenantId, email);
+      const url = `${location.origin}/${res.link}`;
       el.querySelector<HTMLDivElement>("#invite-tenant-result")!.innerHTML = `
-        <div class="success-note">Invite link for ${esc(res.email)} (copy &amp; send):</div>
+        <div class="success-note">Sign-in link for ${esc(res.email)} (copy &amp; send):</div>
         <div class="linkbox">
           <input readonly value="${url}" />
           <button class="btn btn--sm" data-action="copy" data-url="${url}">Copy</button>
@@ -1068,19 +1089,15 @@ document.addEventListener("click", (e) => {
   else if (action === "pay") void handlePay(btn.dataset.id!);
   else if (action === "refund") openRefundModal(btn.dataset.id!);
   else if (action === "invite-tenant") void handleInviteTenant(btn.dataset.id!, btn.dataset.name || "");
-  else if (action === "signout") {
+  else if (action === "select-tenant") {
+    setActiveTenant(btn.dataset.id!);
+    if (session) session.activeTenantId = btn.dataset.id!;
+    location.hash = "#/incoming"; // view the selected tenant's data
+  } else if (action === "signout") {
     clearSession();
     session = null;
     location.hash = "#/login";
   }
-});
-
-document.addEventListener("change", (e) => {
-  const sel = (e.target as HTMLElement).closest<HTMLSelectElement>('[data-action="switch-tenant"]');
-  if (!sel) return;
-  setActiveTenant(sel.value);
-  if (session) session.activeTenantId = sel.value;
-  void refresh();
 });
 
 document.addEventListener("submit", (e) => {
