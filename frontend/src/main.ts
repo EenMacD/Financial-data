@@ -464,8 +464,10 @@ function renderSettings(d: AppData): string {
     <section class="card">
       <div class="card__head"><h2>Team members</h2></div>
       <div class="card__body">
-        <form id="invite-user-form" class="inline-form">
+        <form id="add-user-form" class="inline-form">
+          <input class="input" name="name" placeholder="Full name" required />
           <input class="input" name="email" type="email" placeholder="teammate@business.com" required />
+          <input class="input" name="password" type="password" placeholder="Temp password (min 8)" minlength="8" required />
           ${
             isAdmin
               ? `<select class="select" name="role">
@@ -474,8 +476,9 @@ function renderSettings(d: AppData): string {
                  </select>`
               : `<input type="hidden" name="role" value="tenant" />`
           }
-          <button class="btn btn--primary" type="submit">Invite</button>
+          <button class="btn btn--primary" type="submit">Add user</button>
         </form>
+        <p class="cell-muted" style="font-size:12px;margin:8px 0 0">They sign in with this email and password.</p>
         <table style="margin-top:8px">
           <thead><tr><th>Name</th><th>Email</th><th>Role</th></tr></thead>
           <tbody>${userRows}</tbody>
@@ -766,13 +769,17 @@ function authShell(inner: string): string {
 function renderLogin(): void {
   app.innerHTML = authShell(`
     <h1 class="auth__title">Sign in</h1>
-    <p class="auth__sub">Passwordless — we'll generate a one-time sign-in link.</p>
+    <p class="auth__sub">Enter your email and password.</p>
     <form id="login-form">
       <div class="field">
         <label>Work email</label>
         <input class="input" name="email" type="email" placeholder="you@business.com" required autofocus />
       </div>
-      <button class="btn btn--primary" type="submit" style="width:100%;justify-content:center">Send magic link</button>
+      <div class="field">
+        <label>Password</label>
+        <input class="input" name="password" type="password" placeholder="••••••••" required />
+      </div>
+      <button class="btn btn--primary" type="submit" style="width:100%;justify-content:center">Sign in</button>
     </form>
     <div id="login-result"></div>
     <p class="auth__alt">New travel business? <a href="#/signup">Sign up with KYB/KYC →</a></p>
@@ -885,26 +892,19 @@ function renderSignup(): void {
 // Actions
 // ---------------------------------------------------------------------------
 
-async function handleRequestMagicLink(form: HTMLFormElement): Promise<void> {
-  const email = String(new FormData(form).get("email") || "").trim();
+async function handleLogin(form: HTMLFormElement): Promise<void> {
+  const fd = new FormData(form);
+  const email = String(fd.get("email") || "").trim();
+  const password = String(fd.get("password") || "");
   const result = document.querySelector<HTMLDivElement>("#login-result")!;
   try {
-    const res = await api.magicLink(email);
-    if (res.magic_link) {
-      result.innerHTML = `
-        <div class="success-note">Magic link ready (mock email):</div>
-        <div class="linkbox">
-          <input readonly value="${location.origin}/${res.magic_link}" />
-          <button class="btn btn--sm" data-action="copy" data-url="${location.origin}/${res.magic_link}">Copy</button>
-        </div>
-        <a class="btn btn--primary" href="${res.magic_link}" style="width:100%;justify-content:center;margin-top:8px">Open sign-in link</a>`;
-    } else {
-      result.innerHTML = `<div class="success-note">If an account exists for ${esc(
-        email
-      )}, we've emailed a one-time sign-in link. Check your inbox.</div>`;
-    }
+    const s = await api.login(email, password);
+    setSession(s.token);
+    session = null;
+    if (s.user.tenant_id) setActiveTenant(s.user.tenant_id);
+    location.hash = "#/incoming";
   } catch (e) {
-    toast((e as Error).message, "error");
+    result.innerHTML = `<div class="error-note">${esc((e as Error).message)}</div>`;
   }
 }
 
@@ -950,14 +950,17 @@ async function handleSignup(form: HTMLFormElement): Promise<void> {
   }
 }
 
-async function handleInviteUser(form: HTMLFormElement): Promise<void> {
+async function handleCreateUser(form: HTMLFormElement): Promise<void> {
   const fd = new FormData(form);
+  const name = String(fd.get("name") || "").trim();
   const email = String(fd.get("email") || "").trim();
-  const role = (String(fd.get("role") || "tenant") as "admin" | "tenant");
+  const password = String(fd.get("password") || "");
+  const role = String(fd.get("role") || "tenant") as "admin" | "tenant";
   try {
-    const res = await api.invite({ email, role });
-    showInviteLink(res.email, res.accept_link);
+    await api.createUser({ email, name, password, role });
     form.reset();
+    toast(`Added ${email}`, "success");
+    await loadAndRender();
   } catch (e) {
     toast((e as Error).message, "error");
   }
@@ -1000,25 +1003,6 @@ async function handleInviteTenant(tenantId: string, name: string): Promise<void>
       toast((err as Error).message, "error");
     }
   });
-}
-
-function showInviteLink(email: string, acceptPath: string): void {
-  const url = `${location.origin}/${acceptPath}`;
-  const el = document.createElement("div");
-  el.innerHTML = `
-    <div class="modal__head">
-      <h3>Invite created</h3>
-      <p>Copy this link and send it to ${esc(email)}.</p>
-    </div>
-    <div class="modal__body">
-      <div class="linkbox">
-        <input readonly value="${url}" />
-        <button class="btn btn--sm" data-action="copy" data-url="${url}">Copy</button>
-      </div>
-      <div class="modal__actions"><button class="btn btn--primary" id="invite-done">Done</button></div>
-    </div>`;
-  const close = openModal(el);
-  el.querySelector("#invite-done")!.addEventListener("click", () => close());
 }
 
 async function handleAddTenant(form: HTMLFormElement): Promise<void> {
@@ -1103,10 +1087,10 @@ document.addEventListener("click", (e) => {
 document.addEventListener("submit", (e) => {
   const form = e.target as HTMLFormElement;
   const handlers: Record<string, (f: HTMLFormElement) => void> = {
-    "login-form": (f) => void handleRequestMagicLink(f),
+    "login-form": (f) => void handleLogin(f),
     "accept-form": (f) => void handleAcceptInvite(f),
     "signup-form": (f) => void handleSignup(f),
-    "invite-user-form": (f) => void handleInviteUser(f),
+    "add-user-form": (f) => void handleCreateUser(f),
     "add-tenant-form": (f) => void handleAddTenant(f),
   };
   const handler = handlers[form.id];

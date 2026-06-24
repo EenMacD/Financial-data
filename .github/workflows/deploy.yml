@@ -6,9 +6,11 @@ name: Deploy to Cloud Run
 #   GCP_SA_KEY      - JSON key for the gh-deployer service account (see scripts/setup-gcp.sh)
 #   DATABASE_URL    - Neon pooled connection string (?sslmode=require)
 #   JWT_SECRET      - long random string (e.g. `openssl rand -hex 32`); set once, never rotate casually
-#   RESEND_API_KEY  - Resend API key for emailing sign-in links (required for self-service login)
-#   EMAIL_FROM      - sender for sign-in emails, e.g. `money·data <login@yourdomain.com>` (verified Resend domain)
-#   APP_BASE_URL    - canonical public URL, e.g. https://money-data-xxx.run.app (for absolute links in emails)
+#   ADMIN_EMAIL     - email of the bootstrap platform admin (your login)
+#   ADMIN_PASSWORD  - password for that admin; the app sets/resets it on each boot
+#   RESEND_API_KEY  - (optional) Resend API key — only for the dormant magic-link path
+#   EMAIL_FROM      - (optional) sender for sign-in emails, e.g. `money·data <login@yourdomain.com>`
+#   APP_BASE_URL    - canonical public URL, e.g. https://money-data-xxx.run.app
 on:
   push:
     branches: [main]
@@ -61,7 +63,7 @@ jobs:
             --min-instances 0 --max-instances 3 \
             --memory 512Mi --cpu 1 --port 8080 \
             --quiet \
-            --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }},JWT_SECRET=${{ secrets.JWT_SECRET }},RESEND_API_KEY=${{ secrets.RESEND_API_KEY }},EMAIL_FROM=${{ secrets.EMAIL_FROM }},APP_BASE_URL=${{ secrets.APP_BASE_URL }}"
+            --set-env-vars "^@@^DATABASE_URL=${{ secrets.DATABASE_URL }}@@JWT_SECRET=${{ secrets.JWT_SECRET }}@@ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }}@@ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}@@RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}@@EMAIL_FROM=${{ secrets.EMAIL_FROM }}@@APP_BASE_URL=${{ secrets.APP_BASE_URL }}"
 
       - name: Show service URL
         run: |

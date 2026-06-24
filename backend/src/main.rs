@@ -23,6 +23,10 @@ use tower_http::services::{ServeDir, ServeFile};
 
 #[tokio::main]
 async fn main() {
+    // Load backend/.env if present (local/staging). dotenvy does NOT override vars
+    // already set in the real environment, so deployed config always wins.
+    dotenvy::dotenv().ok();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -46,6 +50,20 @@ async fn main() {
         .await
         .expect("failed to connect to / initialise the database");
 
+    // Bootstrap/refresh the platform admin from env so a fresh OR already-seeded
+    // database always has a known email+password login. No-op unless both vars are
+    // set; changing ADMIN_PASSWORD and restarting rotates the password.
+    if let (Ok(email), Ok(password)) = (env::var("ADMIN_EMAIL"), env::var("ADMIN_PASSWORD")) {
+        let email = email.trim().to_lowercase();
+        if !email.is_empty() && !password.trim().is_empty() {
+            let hash = bcrypt::hash(&password, bcrypt::DEFAULT_COST).expect("hash admin password");
+            db::ensure_admin(&pool, &email, "Admin", &hash)
+                .await
+                .expect("ensure admin account");
+            tracing::info!("ensured admin login for {email}");
+        }
+    }
+
     // No CORS layer: the container serves the frontend and the API on the same
     // origin (and in dev the Vite server proxies /api), so cross-origin access
     // is never needed. If a separate frontend origin is ever introduced, add a
@@ -53,7 +71,9 @@ async fn main() {
     let app = Router::new()
         .route("/api/health", get(handlers::health))
         .route("/api/rates", get(handlers::list_rates))
-        // Auth (public) — passwordless magic link + invite acceptance.
+        // Auth (public) — email+password sign-in, plus the (dormant) passwordless
+        // magic link + invite acceptance.
+        .route("/api/auth/login", post(handlers::login))
         .route("/api/auth/magic-link", post(handlers::request_magic_link))
         .route("/api/auth/verify", post(handlers::verify_magic_link))
         .route("/api/invites/accept", post(handlers::accept_invite))
@@ -70,7 +90,10 @@ async fn main() {
             post(handlers::send_tenant_signin_link),
         )
         .route("/api/invites", post(handlers::create_invite))
-        .route("/api/users", get(handlers::list_users))
+        .route(
+            "/api/users",
+            get(handlers::list_users).post(handlers::create_user),
+        )
         // Tenant-scoped dashboard data.
         .route("/api/wallets", get(handlers::list_wallets))
         .route("/api/quote", post(handlers::create_quote))

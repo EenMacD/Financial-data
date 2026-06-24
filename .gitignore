@@ -19,3 +19,4 @@ dist/
 gh-sa-key.json
 .env
 .env.*
+!.env.example

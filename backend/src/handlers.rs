@@ -56,6 +56,9 @@ fn not_found(m: &str) -> ApiError {
 fn forbidden(m: &str) -> ApiError {
     ApiError(StatusCode::FORBIDDEN, m.to_string())
 }
+fn unauthorized(m: &str) -> ApiError {
+    ApiError(StatusCode::UNAUTHORIZED, m.to_string())
+}
 
 // ---------------------------------------------------------------------------
 // Row types (DB <-> API model mapping)
@@ -266,6 +269,94 @@ pub async fn verify_magic_link(
         .ok_or_else(|| bad("account not found"))?;
     let token = auth::issue_jwt(&user).map_err(internal)?;
     Ok(Json(SessionResp { token, user }))
+}
+
+#[derive(Deserialize)]
+pub struct LoginReq {
+    pub email: String,
+    pub password: String,
+}
+
+/// Email + password sign-in. Mints the same `{token, user}` session as the magic
+/// link. A single generic error covers "no such user" and "wrong password" so the
+/// endpoint can't be used to enumerate accounts.
+pub async fn login(
+    State(pool): State<PgPool>,
+    Json(req): Json<LoginReq>,
+) -> ApiResult<SessionResp> {
+    let email = req.email.trim().to_lowercase();
+    let user = db::find_user_by_email(&pool, &email)
+        .await
+        .map_err(internal)?;
+    let hash = db::get_password_hash(&pool, &email)
+        .await
+        .map_err(internal)?;
+    let ok = match &hash {
+        Some(h) => bcrypt::verify(&req.password, h).unwrap_or(false),
+        None => false,
+    };
+    match (ok, user) {
+        (true, Some(user)) => {
+            let token = auth::issue_jwt(&user).map_err(internal)?;
+            Ok(Json(SessionResp { token, user }))
+        }
+        _ => Err(unauthorized("invalid email or password")),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CreateUserReq {
+    pub email: String,
+    pub name: String,
+    pub password: String,
+    pub role: String,
+    pub tenant_id: Option<String>,
+}
+
+/// Admin/teammate "Add user": create a password-login account. Same authority
+/// rules as invites — admins can create admins or tenant users for any tenant;
+/// tenant users may only add teammates into their own tenant.
+pub async fn create_user(
+    State(pool): State<PgPool>,
+    auth: AuthCtx,
+    Json(req): Json<CreateUserReq>,
+) -> ApiResult<User> {
+    let email = req.email.trim().to_lowercase();
+    let name = req.name.trim();
+    if email.is_empty() || name.is_empty() {
+        return Err(bad("email and name are required"));
+    }
+    if req.password.len() < 8 {
+        return Err(bad("password must be at least 8 characters"));
+    }
+    let want_role = if req.role.eq_ignore_ascii_case("admin") {
+        "admin"
+    } else {
+        "tenant"
+    };
+    if want_role == "admin" && !auth.is_admin() {
+        return Err(forbidden("only admins can create admins"));
+    }
+    let tenant_id: Option<String> = if want_role == "tenant" {
+        Some(match (auth.is_admin(), req.tenant_id.clone()) {
+            (true, Some(t)) => t,
+            _ => db::resolve_tenant(&pool, &auth).await.map_err(internal)?,
+        })
+    } else {
+        None
+    };
+    if db::find_user_by_email(&pool, &email)
+        .await
+        .map_err(internal)?
+        .is_some()
+    {
+        return Err(conflict("a user with that email already exists"));
+    }
+    let hash = bcrypt::hash(&req.password, bcrypt::DEFAULT_COST).map_err(internal)?;
+    let user = db::create_user_with_password(&pool, &email, name, want_role, tenant_id.as_deref(), &hash)
+        .await
+        .map_err(internal)?;
+    Ok(Json(user))
 }
 
 #[derive(Deserialize)]

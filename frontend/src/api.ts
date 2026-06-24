@@ -210,6 +210,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   // Auth
+  login: (email: string, password: string) =>
+    request<SessionResponse>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
   magicLink: (email: string) =>
     request<MagicLinkResponse>("/auth/magic-link", {
       method: "POST",
@@ -246,6 +251,13 @@ export const api = {
       body: JSON.stringify({ email }),
     }),
   listUsers: () => request<User[]>("/users"),
+  createUser: (body: {
+    email: string;
+    name: string;
+    password: string;
+    role: Role;
+    tenant_id?: string;
+  }) => request<User>("/users", { method: "POST", body: JSON.stringify(body) }),
 
   // Public self-serve KYB/KYC sign-up
   signup: (body: {

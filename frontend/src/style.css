@@ -814,6 +814,15 @@ tbody tr:last-child td {
   font-size: 13px;
   margin: 14px 0 4px;
 }
+.error-note {
+  background: var(--danger-soft);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 11px 14px;
+  font-size: 13px;
+  margin: 14px 0 4px;
+}
 
 @media (max-width: 980px) {
   .kpis {

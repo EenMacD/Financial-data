@@ -365,6 +365,76 @@ pub async fn upsert_user(
     Ok(user)
 }
 
+/// The bcrypt hash stored for `email`, if any. `None` means either no such user
+/// or a user that has never had a password set (cannot log in with one).
+pub async fn get_password_hash(pool: &PgPool, email: &str) -> Result<Option<String>, sqlx::Error> {
+    let hash: Option<Option<String>> =
+        sqlx::query_scalar("SELECT password_hash FROM users WHERE lower(email) = lower($1)")
+            .bind(email)
+            .fetch_optional(pool)
+            .await?;
+    Ok(hash.flatten())
+}
+
+/// Create a user with a password hash (the "Add user" flow). Caller must have
+/// already checked the email is free; the UNIQUE(email) constraint is the backstop.
+pub async fn create_user_with_password(
+    pool: &PgPool,
+    email: &str,
+    name: &str,
+    role: &str,
+    tenant_id: Option<&str>,
+    password_hash: &str,
+) -> Result<User, sqlx::Error> {
+    let user = User {
+        id: format!("usr_{}", &Uuid::new_v4().simple().to_string()[..12]),
+        email: email.to_string(),
+        name: name.to_string(),
+        role: role.to_string(),
+        tenant_id: tenant_id.map(|s| s.to_string()),
+        created_at: Utc::now(),
+    };
+    sqlx::query(
+        "INSERT INTO users (id, email, name, role, tenant_id, password_hash, created_at) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7)",
+    )
+    .bind(&user.id)
+    .bind(&user.email)
+    .bind(&user.name)
+    .bind(&user.role)
+    .bind(&user.tenant_id)
+    .bind(password_hash)
+    .bind(user.created_at)
+    .execute(pool)
+    .await?;
+    Ok(user)
+}
+
+/// Idempotently ensure a platform-admin account exists with this password hash.
+/// Runs every boot from ADMIN_EMAIL/ADMIN_PASSWORD so a fresh or already-seeded
+/// database always has a known login (and lets the operator rotate the password
+/// by changing the env var). Upserts on the email's UNIQUE constraint.
+pub async fn ensure_admin(
+    pool: &PgPool,
+    email: &str,
+    name: &str,
+    password_hash: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO users (id, email, name, role, tenant_id, password_hash, created_at) \
+         VALUES ($1, lower($2), $3, 'admin', NULL, $4, now()) \
+         ON CONFLICT (email) DO UPDATE \
+           SET password_hash = EXCLUDED.password_hash, role = 'admin'",
+    )
+    .bind(format!("usr_{}", &Uuid::new_v4().simple().to_string()[..12]))
+    .bind(email)
+    .bind(name)
+    .bind(password_hash)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Auth tokens (magic-link sign-in + invites)
 // ---------------------------------------------------------------------------
